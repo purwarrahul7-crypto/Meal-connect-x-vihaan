@@ -116,6 +116,24 @@ function buildBrowserMenuScript(meals) {
   return `अरे भैया, नमस्ते! MealConnect पर आज का मेन्यू सुन लीजिए। ${lines.join(' ')} अब pickup की बात। टिफ़िन दोपहर एक बजे मिलेगा। Gate number two चुना है तो Gate number two पर मिलेगा, और Gate number one चुना है तो Gate number one पर। जो पसंद आए, उसका ऑर्डर सुबह दस बजे से पहले कर देना। फिर अपना टिफ़िन चुने हुए गेट से ले लेना।`
 }
 
+async function findHumanMenuRecording(date) {
+  const filePattern = new RegExp(`^human-${date}\\.(mp3|m4a|wav|ogg|webm)$`, 'i')
+  const bucket = supabase.storage.from('menu-audio')
+
+  // The documented location is daily/. Also accept the same dated filename
+  // at the bucket root, since it is easy to upload there by mistake.
+  for (const folder of ['daily', '']) {
+    const { data: files, error } = await bucket.list(folder, {
+      limit: 100,
+      search: `human-${date}`
+    })
+    if (error) throw new Error('Could not access the menu-audio bucket. Check its read policy.')
+    const recording = files?.find(({ name }) => filePattern.test(name))
+    if (recording) return `${folder ? `${folder}/` : ''}${recording.name}`
+  }
+  return null
+}
+
 function MealConnectVoice({ meals = [] }) {
   const [speaking, setSpeaking] = useState(false)
   const [loadingVoice, setLoadingVoice] = useState(false)
@@ -134,7 +152,7 @@ function MealConnectVoice({ meals = [] }) {
     }
   }
 
-  const speakWithBrowser = () => {
+  const speakWithBrowser = (status = 'Using this device’s Hindi voice') => {
     if (!('speechSynthesis' in window)) throw new Error('This browser does not support speech playback.')
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(buildBrowserMenuScript(meals))
@@ -144,7 +162,7 @@ function MealConnectVoice({ meals = [] }) {
     utterance.onerror = () => { setSpeaking(false); setVoiceMessage('Could not play the menu. Please try again.') }
     window.speechSynthesis.speak(utterance)
     setSpeaking(true)
-    setVoiceMessage('Using this device’s Hindi voice')
+    setVoiceMessage(status)
   }
 
   const speakMenu = async () => {
@@ -153,30 +171,27 @@ function MealConnectVoice({ meals = [] }) {
     setLoadingVoice(true)
     try {
       const date = getIndiaMenuDate()
-      const { data: files, error: listError } = await supabase.storage
-        .from('menu-audio')
-        .list('daily', { limit: 100, search: `human-${date}` })
-      if (listError) throw listError
-      const recording = files?.find(({ name }) =>
-        new RegExp(`^human-${date}\\.(mp3|m4a|wav|ogg|webm)$`, 'i').test(name)
-      )
-      if (!recording) throw new Error('No human menu recording has been uploaded for today.')
-      const { data, error } = await supabase.storage
-        .from('menu-audio')
-        .download(`daily/${recording.name}`)
-      if (error) throw error
+      const recordingPath = await findHumanMenuRecording(date)
+      if (!recordingPath) throw new Error('No human recording found for today. Upload daily/human-' + date + '.mp3.')
+      const { data, error } = await supabase.storage.from('menu-audio').download(recordingPath)
+      if (error) throw new Error('Could not download today’s recording. Check its Storage read policy.')
       const objectUrl = URL.createObjectURL(data)
       objectUrlRef.current = objectUrl
       const audio = new Audio(objectUrl)
       audioRef.current = audio
       audio.onended = () => { releaseAudio(); setSpeaking(false) }
-      audio.onerror = () => { releaseAudio(); setSpeaking(false); speakWithBrowser() }
+      audio.onerror = () => {
+        releaseAudio()
+        setSpeaking(false)
+        try { speakWithBrowser('The uploaded recording could not play. Playing the device Hindi voice instead.') }
+        catch (fallbackError) { setVoiceMessage(fallbackError.message) }
+      }
       await audio.play()
       setSpeaking(true)
       setVoiceMessage('Today’s human-recorded menu')
-    } catch {
+    } catch (error) {
       releaseAudio()
-      try { speakWithBrowser() }
+      try { speakWithBrowser(`${error.message} Playing the device Hindi voice instead.`) }
       catch (fallbackError) { setVoiceMessage(fallbackError.message) }
     } finally {
       setLoadingVoice(false)
