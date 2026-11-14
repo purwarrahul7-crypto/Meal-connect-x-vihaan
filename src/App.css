@@ -1283,4 +1283,3 @@ footer { background: #f4f2e9; padding: 52px 0; }
   .site section:not(.hero) { opacity: 1; transform: none; transition: none; }
   .hero-visual, .hero-visual .himg { transform: none !important; transition: none !important; }
 }
-

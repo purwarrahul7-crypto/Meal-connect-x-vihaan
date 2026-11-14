@@ -9,10 +9,12 @@ print("Loading Mithi Hindi voice model...")
 tts = Mithi(device="cpu")
 print("Voice model ready!")
 
+
 class VoiceHandler(BaseHTTPRequestHandler):
+
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "http://localhost:5173")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
@@ -38,18 +40,23 @@ class VoiceHandler(BaseHTTPRequestHandler):
             wav = buffer.getvalue()
 
             self.send_response(200)
-            self.send_header("Access-Control-Allow-Origin", "http://localhost:5173")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Type", "audio/wav")
             self.send_header("Content-Length", str(len(wav)))
             self.end_headers()
             self.wfile.write(wav)
 
         except Exception as error:
-            print("TTS error:", error)
-            self.send_error(500, str(error))
+            print("TTS error:", repr(error))
+            self.send_response(500)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(str(error).encode())
 
     def log_message(self, format, *args):
         print(*args)
+
 
 server = HTTPServer(("127.0.0.1", 8000), VoiceHandler)
 print("MealConnect voice server running at http://127.0.0.1:8000")

@@ -1,0 +1,2 @@
+[functions.generate-menu-audio]
+verify_jwt = false

@@ -31,4 +31,3 @@ The website no longer needs OpenAI TTS or a scheduled audio-generation function 
 ```sql
 select cron.unschedule('mealconnect-daily-menu-audio');
 ```
-
