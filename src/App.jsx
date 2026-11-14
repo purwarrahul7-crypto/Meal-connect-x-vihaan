@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from './supabase'
 import './App.css'
 
@@ -97,6 +97,193 @@ async function ensureProfile(user, metadata = {}) {
   return data
 }
 
+
+function MealConnectVoice({ meals = [] }) {
+  const [speaking, setSpeaking] = useState(false)
+  const [loadingVoice, setLoadingVoice] = useState(false)
+  const audioRef = useRef(null)
+  const requestRef = useRef(null)
+  const objectUrlRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      requestRef.current?.abort()
+      audioRef.current?.pause()
+
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current)
+      }
+    }
+  }, [])
+
+  const speakMenu = async () => {
+    if (speaking || loadingVoice) return
+
+    const available = meals.filter(m => m.qty !== 0)
+
+    let script = ''
+
+    if (!available.length) {
+      script =
+        'अरे भाई लोगों! आज का मेन्यू अभी अपडेट नहीं हुआ है। ' +
+        'थोड़ी देर बाद वापस चेक करना। धन्यवाद भाई!'
+    } else {
+      const vendors = available.reduce((acc, meal) => {
+        const vendor = meal.vendor || 'Campus Kitchen'
+        if (!acc[vendor]) acc[vendor] = []
+        acc[vendor].push(meal)
+        return acc
+      }, {})
+
+      script =
+        'अरे भाई लोगों! क्या हाल चाल? स्वागत है आपका MealConnect पर! ' +
+        'चलो देखते हैं आज खाने में क्या-क्या मस्त चीज़ें बनी हैं। '
+
+      Object.entries(vendors).forEach(([vendor, items]) => {
+        script += `अगला स्टॉल है ${vendor}। `
+
+        items.forEach(meal => {
+          script += `${meal.name}। कीमत है ${meal.price} रुपये। `
+
+          if (meal.description) {
+            script += `${meal.description}। `
+          }
+
+          if (meal.qty != null && meal.qty <= 10) {
+            script += `ध्यान देना भाई, सिर्फ ${meal.qty} प्लेट बची हैं। `
+          }
+        })
+      })
+
+      script +=
+        'तो भाई, जो पसंद आया फटाफट ऑर्डर कर दो। ' +
+        'दोपहर एक बजे गेट नंबर दो पर मिल जाएगा। ' +
+        'खाना अच्छा लगे तो दोस्तों को भी बताना। '
+    }
+
+    try {
+      setLoadingVoice(true)
+
+      requestRef.current = new AbortController()
+
+      const response = await fetch('http://127.0.0.1:8000/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ text: script }),
+        signal: requestRef.current.signal
+      })
+
+      if (!response.ok) {
+        throw new Error(`Voice server error: ${response.status}`)
+      }
+
+      const audioBlob = await response.blob()
+
+      if (!audioBlob.size) {
+        throw new Error('The voice server returned empty audio.')
+      }
+
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current)
+      }
+
+      const audioUrl = URL.createObjectURL(audioBlob)
+      objectUrlRef.current = audioUrl
+
+      const audio = new Audio(audioUrl)
+      audioRef.current = audio
+
+      audio.onended = () => {
+        setSpeaking(false)
+        audioRef.current = null
+
+        URL.revokeObjectURL(audioUrl)
+        objectUrlRef.current = null
+      }
+
+      audio.onerror = () => {
+        setSpeaking(false)
+        setLoadingVoice(false)
+        audioRef.current = null
+      }
+
+      setLoadingVoice(false)
+      setSpeaking(true)
+
+      await audio.play()
+    } catch (error) {
+      if (error.name === 'AbortError') return
+
+      console.error('MealConnect voice error:', error)
+
+      setSpeaking(false)
+      setLoadingVoice(false)
+
+      alert(
+        'Bhai, voice server se connect nahi ho pa raha. ' +
+        'Please check that server.py is running.'
+      )
+    }
+  }
+
+  const stopSpeaking = () => {
+    requestRef.current?.abort()
+    requestRef.current = null
+
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
+    }
+
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+
+    setSpeaking(false)
+    setLoadingVoice(false)
+  }
+
+  return (
+    <div className="mc-voice">
+      <button
+        className="mc-voice-button"
+        onClick={speaking || loadingVoice ? stopSpeaking : speakMenu}
+        aria-label={
+          speaking || loadingVoice
+            ? 'Stop menu announcement'
+            : 'Listen to today menu'
+        }
+        disabled={loadingVoice}
+      >
+        {loadingVoice ? '⏳' : speaking ? '■' : '🎙️'}
+      </button>
+
+      <div className="mc-voice-label">
+        <b>
+          {loadingVoice
+            ? 'Bhai awaaz taiyaar kar raha hai...'
+            : speaking
+              ? 'Bhai menu suna raha hai...'
+              : 'Bhai se menu suno'}
+        </b>
+
+        <span>
+          {loadingVoice
+            ? 'Please wait'
+            : speaking
+              ? 'Tap to stop'
+              : "Today's menu · AI Voice"}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+
 function Student({ user, profile, onAccount, onSignOut, meals, refreshMeals, orders, refreshOrders, collegeId }) {
   const [q, setQ] = useState(''), [cat, setCat] = useState('All'), [sort, setSort] = useState('')
   const [cart, setCart] = useState({}), [open, setOpen] = useState(false), [done, setDone] = useState(null)
@@ -167,6 +354,7 @@ function Student({ user, profile, onAccount, onSignOut, meals, refreshMeals, ord
     <footer><div className="wrap"><b className="logo">Meal<span>Connect</span></b><p>Built by a GL Bajaj student, for students. Pilot launching around Greater Noida.</p><small>© 2026 MealConnect</small><p><a href="#admin" onClick={() => { window.location.hash = 'admin' }}>Admin</a></p></div></footer>
     {count > 0 && !open && <button className="cartbar" onClick={() => setOpen(true)}><span>{count} item{count > 1 ? 's' : ''}</span><b>View cart · {rs(total)}</b></button>}
     {open && <div className="overlay" onClick={closeDrawer}><aside className="drawer" role="dialog" aria-modal="true" aria-label="Cart" onClick={(e) => e.stopPropagation()}><button className="x" onClick={closeDrawer} aria-label="Close">×</button>{done ? <div><h2>🎉 Order placed</h2><p className="muted">Your order ID is <b>{done.order_number}</b>. Pay {rs(done.total_amount)} at pickup.</p><OrderCard order={done} /><a className="btn" href="#track" onClick={closeDrawer}>Track this order</a></div> : count === 0 ? <div><h2>Your cart</h2><p className="muted">Your cart is empty. Add a meal from the menu.</p></div> : <div><h2>Your cart</h2>{items.map(i => <div className="line" key={i.id}><span>{i.emoji || '🍱'} {i.name}</span><div className="step-q"><button onClick={() => sub(i)}>−</button><span>{i.n}</span><button onClick={() => add(i)}>+</button></div><b>{rs(i.n * i.price)}</b></div>)}<div className="line tot"><span>Total (pay at pickup)</span><b>{rs(total)}</b></div><input className="field" placeholder="Your full name" value={name} onChange={(e) => setName(e.target.value)} /><input className="field" placeholder="10-digit mobile number" inputMode="numeric" maxLength="10" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} /><select className="field" value={gate} onChange={(e) => setGate(e.target.value)} aria-label="Pickup gate">{GATES.map(g => <option key={g}>{g}</option>)}</select><p className="muted small">Pickup: GL Bajaj {gate}, 1:00 pm. Order before 10 am.</p>{err && <p className="error" role="alert">{err}</p>}<button className="btn block" onClick={place} disabled={busy}>{busy ? 'Placing order…' : user ? `Place order · ${rs(total)}` : 'Log in to place order'}</button></div>}</aside></div>}
+ <MealConnectVoice meals={meals} />
   </div>
 }
 
