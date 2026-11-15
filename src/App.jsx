@@ -218,7 +218,7 @@ function MealConnectVoice({ meals = [] }) {
         {loadingVoice ? '…' : speaking ? 'Ⅱ' : '▶'}
       </button>
       <div className="mc-voice-label">
-        <b>{loadingVoice ? 'Finding today’s recording…' : speaking ? 'Now playing today’s menu' : 'Hear today’s menu'}</b>
+        <b>{loadingVoice ? 'Finding today’s recording…' : speaking ? 'Now playing today’s menu' : 'Bhai Se Suno Aaj Ka Menu'}</b>
         <span>{voiceMessage || 'Human voice · Updated daily'}</span>
       </div>
     </div>
